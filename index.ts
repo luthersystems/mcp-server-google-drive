@@ -194,20 +194,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     } catch (error: any) {
       // Extract more detailed error information from Google API errors
       let errorMessage = error.message || error.toString();
-      let errorDetails = '';
+      let errorCodeSuffix = '';
       
       // Google API errors can have different structures
       if (error.response?.data?.error) {
         const apiError = error.response.data.error;
         errorMessage = apiError.message || errorMessage;
-        errorDetails = ` (code: ${apiError.code || 'unknown'})`;
+        errorCodeSuffix = ` (code: ${apiError.code || 'unknown'})`;
       } else if (error.code) {
-        errorDetails = ` (code: ${error.code})`;
+        errorCodeSuffix = ` (code: ${error.code})`;
       }
       
       // Log full error for debugging (to stderr so it appears in container logs)
       // Use process.stderr.write to ensure it's flushed immediately
-      const errorDetails = {
+      const errorLog = {
         message: error.message,
         code: error.code,
         name: error.name,
@@ -220,13 +220,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         keys: Object.keys(error),
         stringified: error.toString(),
       };
-      process.stderr.write('Google Drive API error: ' + JSON.stringify(errorDetails, null, 2) + '\n');
+      process.stderr.write('Google Drive API error: ' + JSON.stringify(errorLog, null, 2) + '\n');
       
       return {
         content: [
           {
             type: "text",
-            text: `Error searching Google Drive: ${errorMessage}${errorDetails}`,
+            text: `Error searching Google Drive: ${errorMessage}${errorCodeSuffix}`,
           },
         ],
         isError: true,
