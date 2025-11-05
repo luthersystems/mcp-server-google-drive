@@ -197,10 +197,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let errorCodeSuffix = '';
       
       // Google API errors can have different structures
-      if (error.response?.data?.error) {
-        const apiError = error.response.data.error;
-        errorMessage = apiError.message || errorMessage;
-        errorCodeSuffix = ` (code: ${apiError.code || 'unknown'})`;
+      // error.response.data.error can be a string or an object
+      if (error.response?.data) {
+        const responseData = error.response.data;
+        if (typeof responseData.error === 'object' && responseData.error !== null) {
+          // Error is an object with message/code
+          const apiError = responseData.error;
+          errorMessage = apiError.message || errorMessage;
+          errorCodeSuffix = ` (code: ${apiError.code || responseData.error || 'unknown'})`;
+        } else if (typeof responseData.error === 'string') {
+          // Error is a string (like "invalid_request")
+          errorMessage = responseData.error_description || responseData.error || errorMessage;
+          errorCodeSuffix = ` (code: ${responseData.error})`;
+        }
       } else if (error.code) {
         errorCodeSuffix = ` (code: ${error.code})`;
       }
@@ -213,6 +222,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         name: error.name,
         response: error.response?.data ? {
           error: error.response.data.error,
+          error_description: error.response.data.error_description,
+          full_data: error.response.data,
           status: error.response.status,
           statusText: error.response.statusText,
         } : undefined,
