@@ -165,27 +165,43 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "gdrive_search") {
     const userQuery = request.params.arguments?.query as string;
-    const escapedQuery = userQuery.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-    const formattedQuery = `fullText contains '${escapedQuery}'`;
+    if (!userQuery) {
+      throw new McpError(ErrorCode.InvalidParams, "Query parameter is required");
+    }
     
-    const res = await drive.files.list({
-      q: formattedQuery,
-      pageSize: 10,
-      fields: "files(id, name, mimeType, modifiedTime, size)",
-    });
-    
-    const fileList = res.data.files
-      ?.map((file: any) => `${file.name} (${file.mimeType}) - ID: ${file.id}`)
-      .join("\n");
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Found ${res.data.files?.length ?? 0} files:\n${fileList}`,
-        },
-      ],
-      isError: false,
-    };
+    try {
+      const escapedQuery = userQuery.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      const formattedQuery = `fullText contains '${escapedQuery}'`;
+      
+      const res = await drive.files.list({
+        q: formattedQuery,
+        pageSize: 10,
+        fields: "files(id, name, mimeType, modifiedTime, size)",
+      });
+      
+      const fileList = res.data.files
+        ?.map((file: any) => `${file.name} (${file.mimeType}) - ID: ${file.id}`)
+        .join("\n");
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Found ${res.data.files?.length ?? 0} files:\n${fileList}`,
+          },
+        ],
+        isError: false,
+      };
+    } catch (error: any) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error searching Google Drive: ${error.message || error.toString()}`,
+          },
+        ],
+        isError: true,
+      };
+    }
   } else if (request.params.name === "gdrive_read_file") {
     const fileId = request.params.arguments?.file_id as string;
     if (!fileId) {
