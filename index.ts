@@ -252,11 +252,21 @@ async function loadCredentialsAndRunServer() {
   await server.connect(transport);
 }
 
-if (process.argv[2] === "auth") {
+// Parse command line arguments
+const args = process.argv.slice(2);
+const transportArgIndex = args.indexOf("--transport");
+const transport = transportArgIndex !== -1 && args[transportArgIndex + 1] 
+  ? args[transportArgIndex + 1] 
+  : "stdio"; // Default to stdio
+
+if (args[0] === "auth") {
   authenticateAndSaveCredentials().catch(console.error);
-} else {
+} else if (transport === "stdio") {
   loadCredentialsAndRunServer().catch((error) => {
     process.stderr.write(`Error: ${error}\n`);
     process.exit(1);
   });
+} else {
+  console.error(`Transport '${transport}' is not yet supported. Only 'stdio' is currently supported.`);
+  process.exit(1);
 }
