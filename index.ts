@@ -303,8 +303,21 @@ async function loadCredentialsAndRunServer() {
     process.exit(1);
   }
 
+  const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(process.cwd(), "credentials", "gcp-oauth.keys.json");
+  if (!fs.existsSync(keyPath)) {
+    console.error(
+      "OAuth keys file not found. Please set GOOGLE_APPLICATION_CREDENTIALS environment variable.",
+    );
+    process.exit(1);
+  }
+
+  const keyFile = JSON.parse(fs.readFileSync(keyPath, "utf-8"));
+  const clientId = keyFile.installed?.client_id || keyFile.client_id;
+  const clientSecret = keyFile.installed?.client_secret || keyFile.client_secret;
+  const redirectUri = keyFile.installed?.redirect_uris?.[0] || "http://localhost";
+
   const credentials = JSON.parse(fs.readFileSync(credentialsPath, "utf-8"));
-  const auth = new google.auth.OAuth2();
+  const auth = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
   auth.setCredentials(credentials);
   google.options({ auth });
 
