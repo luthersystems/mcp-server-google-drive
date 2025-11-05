@@ -170,8 +170,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     
     try {
+      // Escape single quotes in the query string
       const escapedQuery = userQuery.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-      const formattedQuery = `fullText contains '${escapedQuery}'`;
+      // Try using 'name contains' first - 'fullText' may not be supported or may require special permissions
+      // If fullText is needed, it might require enabling Drive API with full-text search capabilities
+      const formattedQuery = `name contains '${escapedQuery}'`;
       
       const res = await drive.files.list({
         q: formattedQuery,
