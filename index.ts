@@ -206,15 +206,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       
       // Log full error for debugging (to stderr so it appears in container logs)
-      console.error('Google Drive API error:', JSON.stringify({
+      // Use process.stderr.write to ensure it's flushed immediately
+      const errorDetails = {
         message: error.message,
         code: error.code,
+        name: error.name,
         response: error.response?.data ? {
           error: error.response.data.error,
           status: error.response.status,
+          statusText: error.response.statusText,
         } : undefined,
-        stack: error.stack,
-      }, null, 2));
+        // Try to extract more details from the error object
+        keys: Object.keys(error),
+        stringified: error.toString(),
+      };
+      process.stderr.write('Google Drive API error: ' + JSON.stringify(errorDetails, null, 2) + '\n');
       
       return {
         content: [
