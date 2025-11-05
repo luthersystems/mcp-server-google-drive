@@ -6,6 +6,10 @@
   "author": "Anthropic, PBC (https://anthropic.com)",
   "homepage": "https://modelcontextprotocol.io",
   "bugs": "https://github.com/modelcontextprotocol/servers/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luthersystems/mcp-server-google-drive"
+  },
   "type": "module",
   "bin": {
     "mcp-server-gdrive": "dist/index.js"
