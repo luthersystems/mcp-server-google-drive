@@ -192,11 +192,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         isError: false,
       };
     } catch (error: any) {
+      // Extract more detailed error information from Google API errors
+      let errorMessage = error.message || error.toString();
+      if (error.response?.data?.error) {
+        const apiError = error.response.data.error;
+        errorMessage = `${apiError.message || errorMessage} (code: ${apiError.code || 'unknown'})`;
+      } else if (error.code) {
+        errorMessage = `${errorMessage} (code: ${error.code})`;
+      }
+      
       return {
         content: [
           {
             type: "text",
-            text: `Error searching Google Drive: ${error.message || error.toString()}`,
+            text: `Error searching Google Drive: ${errorMessage}`,
           },
         ],
         isError: true,
