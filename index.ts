@@ -194,18 +194,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     } catch (error: any) {
       // Extract more detailed error information from Google API errors
       let errorMessage = error.message || error.toString();
+      let errorDetails = '';
+      
+      // Google API errors can have different structures
       if (error.response?.data?.error) {
         const apiError = error.response.data.error;
-        errorMessage = `${apiError.message || errorMessage} (code: ${apiError.code || 'unknown'})`;
+        errorMessage = apiError.message || errorMessage;
+        errorDetails = ` (code: ${apiError.code || 'unknown'})`;
       } else if (error.code) {
-        errorMessage = `${errorMessage} (code: ${error.code})`;
+        errorDetails = ` (code: ${error.code})`;
       }
+      
+      // Log full error for debugging (to stderr so it appears in container logs)
+      console.error('Google Drive API error:', JSON.stringify({
+        message: error.message,
+        code: error.code,
+        response: error.response?.data ? {
+          error: error.response.data.error,
+          status: error.response.status,
+        } : undefined,
+        stack: error.stack,
+      }, null, 2));
       
       return {
         content: [
           {
             type: "text",
-            text: `Error searching Google Drive: ${errorMessage}`,
+            text: `Error searching Google Drive: ${errorMessage}${errorDetails}`,
           },
         ],
         isError: true,
