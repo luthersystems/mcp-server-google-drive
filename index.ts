@@ -307,7 +307,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       
       // Return text format (default)
-      return createResponse(result.content, false);
+      return createResponse(result.content as string, false);
     } catch (error: any) {
       // Return JSON format for errors if OUTPUT_FORMAT=json
       if (isJsonOutput()) {
