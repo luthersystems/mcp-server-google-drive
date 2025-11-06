@@ -17,6 +17,36 @@ import path from "path";
 
 const drive = google.drive("v3");
 
+// Get output format from environment variable (defaults to 'text')
+const OUTPUT_FORMAT = process.env.OUTPUT_FORMAT || 'text';
+
+// Helper function to check if JSON output is enabled
+function isJsonOutput(): boolean {
+  return OUTPUT_FORMAT === 'json';
+}
+
+// Helper function to create MCP tool response
+function createResponse(data: string | object, isError: boolean = false) {
+  let text: string;
+  
+  // If data is an object and JSON output is enabled, stringify it
+  if (typeof data === 'object' && isJsonOutput()) {
+    text = JSON.stringify(data, null, 2);
+  } else {
+    text = String(data);
+  }
+  
+  return {
+    content: [
+      {
+        type: "text",
+        text: text,
+      },
+    ],
+    isError: isError,
+  };
+}
+
 const server = new Server(
   {
     name: "gdrive",
@@ -181,18 +211,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         fields: "files(id, name, mimeType, modifiedTime, size)",
       });
       
-      const fileList = res.data.files
-        ?.map((file: any) => `${file.name} (${file.mimeType}) - ID: ${file.id}`)
+      const files = res.data.files || [];
+      
+      // Return JSON format if OUTPUT_FORMAT=json
+      if (isJsonOutput()) {
+        const jsonResponse = {
+          files: files.map((file: any) => ({
+            id: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            modifiedTime: file.modifiedTime,
+            size: file.size,
+          })),
+          total: files.length,
+        };
+        return createResponse(jsonResponse, false);
+      }
+      
+      // Return text format (default)
+      const fileList = files
+        .map((file: any) => `${file.name} (${file.mimeType}) - ID: ${file.id}`)
         .join("\n");
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Found ${res.data.files?.length ?? 0} files:\n${fileList}`,
-          },
-        ],
-        isError: false,
-      };
+      return createResponse(`Found ${files.length} files:\n${fileList}`, false);
     } catch (error: any) {
       // Extract more detailed error information from Google API errors
       let errorMessage = error.message || error.toString();
@@ -235,15 +275,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
       process.stderr.write('Google Drive API error: ' + JSON.stringify(errorLog, null, 2) + '\n');
       
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error searching Google Drive: ${errorMessage}${errorCodeSuffix}`,
-          },
-        ],
-        isError: true,
-      };
+      // Return JSON format for errors if OUTPUT_FORMAT=json
+      if (isJsonOutput()) {
+        const errorResponse = {
+          error: true,
+          message: errorMessage,
+          code: error.code || error.response?.data?.error?.code || 'unknown',
+        };
+        return createResponse(errorResponse, true);
+      }
+      
+      return createResponse(`Error searching Google Drive: ${errorMessage}${errorCodeSuffix}`, true);
     }
   } else if (request.params.name === "gdrive_read_file") {
     const fileId = request.params.arguments?.file_id as string;
@@ -253,25 +295,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     try {
       const result = await readFileContent(fileId);
-      return {
-        content: [
-          {
-            type: "text",
-            text: result.content,
-          },
-        ],
-        isError: false,
-      };
+      
+      // Return JSON format if OUTPUT_FORMAT=json
+      if (isJsonOutput()) {
+        const jsonResponse = {
+          fileId: fileId,
+          mimeType: result.mimeType,
+          content: result.content,
+        };
+        return createResponse(jsonResponse, false);
+      }
+      
+      // Return text format (default)
+      return createResponse(result.content, false);
     } catch (error: any) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error reading file: ${error.message}`,
-          },
-        ],
-        isError: true,
-      };
+      // Return JSON format for errors if OUTPUT_FORMAT=json
+      if (isJsonOutput()) {
+        const errorResponse = {
+          error: true,
+          message: error.message || error.toString(),
+          fileId: fileId,
+        };
+        return createResponse(errorResponse, true);
+      }
+      
+      return createResponse(`Error reading file: ${error.message}`, true);
     }
   }
   throw new Error("Tool not found");
