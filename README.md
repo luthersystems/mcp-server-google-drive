@@ -136,11 +136,41 @@ npm run build
 
 ## 🔧 Usage
 
+### Output Format
+
+The server supports two output formats controlled by the `OUTPUT_FORMAT` environment variable:
+
+- **`text`** (default): Returns human-readable text responses
+- **`json`**: Returns structured JSON responses for programmatic consumption
+
+When `OUTPUT_FORMAT=json`:
+- `gdrive_search` returns a JSON object with a `files` array containing file objects with `id`, `name`, `mimeType`, `modifiedTime`, and `size` fields
+- `gdrive_read_file` returns a JSON object with `fileId`, `mimeType`, and `content` fields
+
+Example JSON output from `gdrive_search`:
+```json
+{
+  "files": [
+    {
+      "id": "mock_spreadsheet_123",
+      "name": "Rent Value Update Report",
+      "mimeType": "application/vnd.google-apps.spreadsheet",
+      "modifiedTime": "2024-01-01T00:00:00.000Z",
+      "size": "1024"
+    }
+  ],
+  "total": 1
+}
+```
+
 ### As a Command Line Tool
 
 ```bash
-# Start the server
+# Start the server with default text output
 node dist/index.js
+
+# Start the server with JSON output
+OUTPUT_FORMAT=json node dist/index.js
 ```
 
 ### Integration with Desktop App
@@ -155,7 +185,8 @@ Add this configuration to your app's server settings:
       "args": ["path/to/gdrive-mcp-server/dist/index.js"],
       "env": {
         "GOOGLE_APPLICATION_CREDENTIALS": "path/to/gdrive-mcp-server/credentials/gcp-oauth.keys.json",
-        "MCP_GDRIVE_CREDENTIALS": "path/to/gdrive-mcp-server/credentials/.gdrive-server-credentials.json"
+        "MCP_GDRIVE_CREDENTIALS": "path/to/gdrive-mcp-server/credentials/.gdrive-server-credentials.json",
+        "OUTPUT_FORMAT": "json"
       }
     }
   }
@@ -163,6 +194,48 @@ Add this configuration to your app's server settings:
 ```
 
 Replace `path/to/gdrive-mcp-server` with the actual path to your installation directory.
+
+### Alternative: Base64 Encoded Credentials (Containerized Environments)
+
+For containerized deployments (Docker, Kubernetes) where managing files is difficult, you can provide credentials as base64 encoded environment variables:
+
+```json
+{
+  "mcpServers": {
+    "gdrive": {
+      "command": "node",
+      "args": ["path/to/gdrive-mcp-server/dist/index.js"],
+      "env": {
+        "OAUTH_CREDENTIALS_JSON_B64": "ewogICJpbnN0YWxsZWQiOiB7CiAgICAiY2xpZW50X2lkIjogIi4uLiIsCiAgICAiY2xpZW50X3NlY3JldCI6ICIuLi4iCiAgfQp9",
+        "GDRIVE_CREDENTIALS_JSON_B64": "ewogICJhY2Nlc3NfdG9rZW4iOiAiLi4uIiwKICAicmVmcmVzaF90b2tlbiI6ICIuLi4iCn0=",
+        "OUTPUT_FORMAT": "json"
+      }
+    }
+  }
+}
+```
+
+**To generate base64 encoded credentials:**
+
+```bash
+# Encode OAuth client credentials
+base64 < credentials/gcp-oauth.keys.json | tr -d '\n'
+
+# Encode user credentials
+base64 < credentials/.gdrive-server-credentials.json | tr -d '\n'
+```
+
+**Environment Variable Priority:**
+
+The server checks for credentials in this order:
+1. `OAUTH_CREDENTIALS_JSON_B64` (base64 encoded OAuth client credentials)
+2. `GOOGLE_APPLICATION_CREDENTIALS` (path to OAuth client credentials file)
+3. Default path: `credentials/gcp-oauth.keys.json`
+
+For user credentials:
+1. `GDRIVE_CREDENTIALS_JSON_B64` (base64 encoded user OAuth tokens)
+2. `MCP_GDRIVE_CREDENTIALS` (path to user credentials file)
+3. Default path: `credentials/.gdrive-server-credentials.json`
 
 ### Example Usage
 
