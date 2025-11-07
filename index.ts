@@ -17,6 +17,36 @@ import path from "path";
 
 const drive = google.drive("v3");
 
+// Get output format from environment variable (defaults to 'text')
+const OUTPUT_FORMAT = process.env.OUTPUT_FORMAT || 'text';
+
+// Helper function to check if JSON output is enabled
+function isJsonOutput(): boolean {
+  return OUTPUT_FORMAT === 'json';
+}
+
+// Helper function to create MCP tool response
+function createResponse(data: string | object, isError: boolean = false) {
+  let text: string;
+  
+  // If data is an object and JSON output is enabled, stringify it
+  if (typeof data === 'object' && isJsonOutput()) {
+    text = JSON.stringify(data, null, 2);
+  } else {
+    text = String(data);
+  }
+  
+  return {
+    content: [
+      {
+        type: "text",
+        text: text,
+      },
+    ],
+    isError: isError,
+  };
+}
+
 const server = new Server(
   {
     name: "gdrive",
@@ -165,27 +195,98 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "gdrive_search") {
     const userQuery = request.params.arguments?.query as string;
-    const escapedQuery = userQuery.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-    const formattedQuery = `fullText contains '${escapedQuery}'`;
+    if (!userQuery) {
+      throw new McpError(ErrorCode.InvalidParams, "Query parameter is required");
+    }
     
-    const res = await drive.files.list({
-      q: formattedQuery,
-      pageSize: 10,
-      fields: "files(id, name, mimeType, modifiedTime, size)",
-    });
-    
-    const fileList = res.data.files
-      ?.map((file: any) => `${file.name} (${file.mimeType}) - ID: ${file.id}`)
-      .join("\n");
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Found ${res.data.files?.length ?? 0} files:\n${fileList}`,
-        },
-      ],
-      isError: false,
-    };
+    try {
+      // Escape single quotes in the query string
+      const escapedQuery = userQuery.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      // Try both 'name contains' and 'fullText contains' to search both file names and content
+      const formattedQuery = `name contains '${escapedQuery}' or fullText contains '${escapedQuery}'`;
+      
+      const res = await drive.files.list({
+        q: formattedQuery,
+        pageSize: 10,
+        fields: "files(id, name, mimeType, modifiedTime, size)",
+      });
+      
+      const files = res.data.files || [];
+      
+      // Return JSON format if OUTPUT_FORMAT=json
+      if (isJsonOutput()) {
+        const jsonResponse = {
+          files: files.map((file: any) => ({
+            id: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            modifiedTime: file.modifiedTime,
+            size: file.size,
+          })),
+          total: files.length,
+        };
+        return createResponse(jsonResponse, false);
+      }
+      
+      // Return text format (default)
+      const fileList = files
+        .map((file: any) => `${file.name} (${file.mimeType}) - ID: ${file.id}`)
+        .join("\n");
+      return createResponse(`Found ${files.length} files:\n${fileList}`, false);
+    } catch (error: any) {
+      // Extract more detailed error information from Google API errors
+      let errorMessage = error.message || error.toString();
+      let errorCodeSuffix = '';
+      
+      // Google API errors can have different structures
+      // error.response.data.error can be a string or an object
+      if (error.response?.data) {
+        const responseData = error.response.data;
+        if (typeof responseData.error === 'object' && responseData.error !== null) {
+          // Error is an object with message/code
+          const apiError = responseData.error;
+          errorMessage = apiError.message || errorMessage;
+          errorCodeSuffix = ` (code: ${apiError.code || responseData.error || 'unknown'})`;
+        } else if (typeof responseData.error === 'string') {
+          // Error is a string (like "invalid_request")
+          errorMessage = responseData.error_description || responseData.error || errorMessage;
+          errorCodeSuffix = ` (code: ${responseData.error})`;
+        }
+      } else if (error.code) {
+        errorCodeSuffix = ` (code: ${error.code})`;
+      }
+      
+      // Log full error for debugging (to stderr so it appears in container logs)
+      // Use process.stderr.write to ensure it's flushed immediately
+      const errorLog = {
+        message: error.message,
+        code: error.code,
+        name: error.name,
+        response: error.response?.data ? {
+          error: error.response.data.error,
+          error_description: error.response.data.error_description,
+          full_data: error.response.data,
+          status: error.response.status,
+          statusText: error.response.statusText,
+        } : undefined,
+        // Try to extract more details from the error object
+        keys: Object.keys(error),
+        stringified: error.toString(),
+      };
+      process.stderr.write('Google Drive API error: ' + JSON.stringify(errorLog, null, 2) + '\n');
+      
+      // Return JSON format for errors if OUTPUT_FORMAT=json
+      if (isJsonOutput()) {
+        const errorResponse = {
+          error: true,
+          message: errorMessage,
+          code: error.code || error.response?.data?.error?.code || 'unknown',
+        };
+        return createResponse(errorResponse, true);
+      }
+      
+      return createResponse(`Error searching Google Drive: ${errorMessage}${errorCodeSuffix}`, true);
+    }
   } else if (request.params.name === "gdrive_read_file") {
     const fileId = request.params.arguments?.file_id as string;
     if (!fileId) {
@@ -194,31 +295,43 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     try {
       const result = await readFileContent(fileId);
-      return {
-        content: [
-          {
-            type: "text",
-            text: result.content,
-          },
-        ],
-        isError: false,
-      };
+      
+      // Return JSON format if OUTPUT_FORMAT=json
+      if (isJsonOutput()) {
+        const jsonResponse = {
+          fileId: fileId,
+          mimeType: result.mimeType,
+          content: result.content,
+        };
+        return createResponse(jsonResponse, false);
+      }
+      
+      // Return text format (default)
+      return createResponse(result.content as string, false);
     } catch (error: any) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error reading file: ${error.message}`,
-          },
-        ],
-        isError: true,
-      };
+      // Return JSON format for errors if OUTPUT_FORMAT=json
+      if (isJsonOutput()) {
+        const errorResponse = {
+          error: true,
+          message: error.message || error.toString(),
+          fileId: fileId,
+        };
+        return createResponse(errorResponse, true);
+      }
+      
+      return createResponse(`Error reading file: ${error.message}`, true);
     }
   }
   throw new Error("Tool not found");
 });
 
 const credentialsPath = process.env.MCP_GDRIVE_CREDENTIALS || path.join(process.cwd(), "credentials", ".gdrive-server-credentials.json");
+
+// Helper function to decode base64 and parse JSON
+function decodeBase64Json(base64String: string): any {
+  const decoded = Buffer.from(base64String, 'base64').toString('utf-8');
+  return JSON.parse(decoded);
+}
 
 async function authenticateAndSaveCredentials() {
   const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(process.cwd(), "credentials", "gcp-oauth.keys.json");
@@ -236,15 +349,57 @@ async function authenticateAndSaveCredentials() {
 }
 
 async function loadCredentialsAndRunServer() {
-  if (!fs.existsSync(credentialsPath)) {
-    console.error(
-      "Credentials not found. Please run with 'auth' argument first.",
-    );
-    process.exit(1);
+  let keyFile: any;
+  let credentials: any;
+
+  // Try to load OAuth client credentials from base64 env var first
+  if (process.env.OAUTH_CREDENTIALS_JSON_B64) {
+    console.log("Using base64 encoded OAuth credentials from OAUTH_CREDENTIALS_JSON_B64");
+    try {
+      keyFile = decodeBase64Json(process.env.OAUTH_CREDENTIALS_JSON_B64);
+    } catch (error) {
+      console.error("Error decoding OAUTH_CREDENTIALS_JSON_B64:", error);
+      process.exit(1);
+    }
+  } else {
+    // Fall back to file path
+    const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(process.cwd(), "credentials", "gcp-oauth.keys.json");
+    if (!fs.existsSync(keyPath)) {
+      console.error(
+        "OAuth keys file not found. Please set GOOGLE_APPLICATION_CREDENTIALS or OAUTH_CREDENTIALS_JSON_B64 environment variable.",
+      );
+      process.exit(1);
+    }
+    keyFile = JSON.parse(fs.readFileSync(keyPath, "utf-8"));
+    console.log("Using OAuth credentials from file:", keyPath);
   }
 
-  const credentials = JSON.parse(fs.readFileSync(credentialsPath, "utf-8"));
-  const auth = new google.auth.OAuth2();
+  // Try to load user credentials from base64 env var first
+  if (process.env.GDRIVE_CREDENTIALS_JSON_B64) {
+    console.log("Using base64 encoded GDrive credentials from GDRIVE_CREDENTIALS_JSON_B64");
+    try {
+      credentials = decodeBase64Json(process.env.GDRIVE_CREDENTIALS_JSON_B64);
+    } catch (error) {
+      console.error("Error decoding GDRIVE_CREDENTIALS_JSON_B64:", error);
+      process.exit(1);
+    }
+  } else {
+    // Fall back to file path
+    if (!fs.existsSync(credentialsPath)) {
+      console.error(
+        "Credentials not found. Please run with 'auth' argument first or set GDRIVE_CREDENTIALS_JSON_B64 environment variable.",
+      );
+      process.exit(1);
+    }
+    credentials = JSON.parse(fs.readFileSync(credentialsPath, "utf-8"));
+    console.log("Using GDrive credentials from file:", credentialsPath);
+  }
+
+  const clientId = keyFile.installed?.client_id || keyFile.client_id;
+  const clientSecret = keyFile.installed?.client_secret || keyFile.client_secret;
+  const redirectUri = keyFile.installed?.redirect_uris?.[0] || "http://localhost";
+
+  const auth = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
   auth.setCredentials(credentials);
   google.options({ auth });
 
@@ -252,11 +407,21 @@ async function loadCredentialsAndRunServer() {
   await server.connect(transport);
 }
 
-if (process.argv[2] === "auth") {
+// Parse command line arguments
+const args = process.argv.slice(2);
+const transportArgIndex = args.indexOf("--transport");
+const transport = transportArgIndex !== -1 && args[transportArgIndex + 1] 
+  ? args[transportArgIndex + 1] 
+  : "stdio"; // Default to stdio
+
+if (args[0] === "auth") {
   authenticateAndSaveCredentials().catch(console.error);
-} else {
+} else if (transport === "stdio") {
   loadCredentialsAndRunServer().catch((error) => {
     process.stderr.write(`Error: ${error}\n`);
     process.exit(1);
   });
+} else {
+  console.error(`Transport '${transport}' is not yet supported. Only 'stdio' is currently supported.`);
+  process.exit(1);
 }
